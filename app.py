@@ -14,7 +14,7 @@ st.set_page_config(page_title="NSE  App", layout="wide")
 # -----------------------------
 # Sidebar Inputs
 # -----------------------------
-st.sidebar.title("📈 Stock Forecasting App")
+st.sidebar.title("📈 Stock  App")
 
 start = st.sidebar.date_input("Start Date", dt.date(2024, 1, 1))
 end = st.sidebar.date_input("End Date", dt.date(2025, 11, 14))
