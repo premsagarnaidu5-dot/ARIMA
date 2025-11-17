@@ -9,7 +9,7 @@ import datetime as dt
 from statsmodels.tsa.stattools import adfuller
 from statsmodels.tsa.arima.model import ARIMA
 
-st.set_page_config(page_title="NSE Stock Forecasting App", layout="wide")
+st.set_page_config(page_title="NSE  App", layout="wide")
 
 # -----------------------------
 # Sidebar Inputs
