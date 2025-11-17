@@ -1,118 +1,148 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from statsmodels.tsa.stattools import adfuller
-from statsmodels.tsa.arima.model import ARIMA
+import plotly.express as px
+import plotly.graph_objects as go
+import seaborn as sns
 import matplotlib.pyplot as plt
 import datetime as dt
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.tsa.arima.model import ARIMA
 
-st.set_page_config(page_title="Stock Forecast Dashboard", layout="wide")
+st.set_page_config(page_title="NSE Stock Forecasting App", layout="wide")
 
-# --------------------
-# Utility Functions
-# --------------------
+# -----------------------------
+# Sidebar Inputs
+# -----------------------------
+st.sidebar.title("📈 Stock Forecasting App")
 
+start = st.sidebar.date_input("Start Date", dt.date(2024, 1, 1))
+end = st.sidebar.date_input("End Date", dt.date(2025, 11, 14))
+
+stocks = {
+    "Reliance": "RELIANCE.NS",
+    "TCS": "TCS.NS",
+    "HDFC Bank": "HDFCBANK.NS",
+    "Infosys": "INFY.NS",
+    "SBI": "SBIN.NS",
+    "Bharti Airtel": "BHARTIARTL.NS",
+    "L&T": "LT.NS",
+    "ICICI Bank": "ICICIBANK.NS",
+    "LIC": "LICI.NS",
+    "IOC": "IOC.NS"
+}
+
+selected_stock = st.sidebar.selectbox("Select Stock", list(stocks.keys()))
+symbol = stocks[selected_stock]
+
+# -----------------------------
+# Download Data
+# -----------------------------
+@st.cache_data
+def load_data():
+    df_list = []
+    for name, ticker in stocks.items():
+        data = yf.download(ticker, start=start, end=end)
+        if not data.empty:
+            data.columns = data.columns.get_level_values(0)
+            data = data.reset_index()
+            data["Stock"] = name
+            df_list.append(data)
+    return pd.concat(df_list, axis=0)
+
+df = load_data()
+
+st.title("📊 NSE Stock Dashboard")
+st.write("View stock analysis, stationarity check, ARIMA forecasting, and creative charts.")
+
+s = df[df["Stock"] == selected_stock].copy()
+s.set_index("Date", inplace=True)
+
+# -----------------------------
+# Create Returns Column
+# -----------------------------
+s["Return"] = s["Close"].pct_change()
+
+# -----------------------------
+# Candlestick Chart
+# -----------------------------
+st.subheader(f"📌 Candlestick Chart – {selected_stock}")
+
+fig = go.Figure(data=[
+    go.Candlestick(
+        x=s.index,
+        open=s["Open"],
+        high=s["High"],
+        low=s["Low"],
+        close=s["Close"]
+    )
+])
+fig.update_layout(height=500, width=900)
+st.plotly_chart(fig, use_container_width=True)
+
+# -----------------------------
+# Line Chart for Close Price
+# -----------------------------
+st.subheader("📈 Closing Price Trend")
+st.line_chart(s["Close"])
+
+# -----------------------------
+# Return Plot
+# -----------------------------
+st.subheader("📉 Daily Returns (%)")
+st.line_chart(s["Return"] * 100)
+
+# -----------------------------
+# Stationarity Test
+# -----------------------------
 def check_stationarity(series):
-    """Return ADF p-value and stationarity result."""
     result = adfuller(series.dropna())
-    p_value = result[1]
-    if p_value < 0.05:
-        return p_value, "Stationary"
-    else:
-        return p_value, "Not Stationary"
+    return result[1] < 0.05, result[1]
 
-def load_stock_data(ticker, start, end):
-    df = yf.download(ticker, start=start, end=end)
-    if len(df) == 0:
-        return None
-    df.columns = df.columns.get_level_values(0)
-    df = df.reset_index()
-    df = df.set_index("Date")
-    return df
+is_stat, p_value = check_stationarity(s["Close"])
 
+st.subheader("🧪 Stationarity Test (ADF)")
 
-# --------------------
-# Streamlit UI
-# --------------------
+if is_stat:
+    st.success(f"The series is **stationary** (p-value = {p_value:.5f})")
+else:
+    st.warning(f"The series is **NOT stationary** (p-value = {p_value:.5f})")
 
-st.title("📈 Stock Price Forecasting Dashboard")
-st.write("Predict stock prices using **ARIMA Time Series Model**")
+# Differenced series plot
+s["Close_diff"] = s["Close"].diff()
 
-# Stock selection
-stock = st.selectbox(
-    "Select Stock",
-    ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "SBIN.NS",
-     "BHARTIARTL.NS", "LT.NS", "ICICIBANK.NS", "LICI.NS", "IOC.NS"]
-)
+st.subheader("📉 Differenced Close Price (1st Order)")
+st.line_chart(s["Close_diff"])
 
-start_date = st.date_input("Start Date", dt.date(2024,1,1))
-end_date = st.date_input("End Date", dt.date.today())
+# -----------------------------
+# ARIMA Forecasting
+# -----------------------------
+st.subheader("🔮 ARIMA Forecast (Next 10 Days)")
 
-if st.button("Run Forecast"):
-    st.subheader(f"📥 Downloading Data for {stock} ...")
-    
-    df = load_stock_data(stock, start_date, end_date)
+model = ARIMA(s["Close"], order=(5, 1, 0))
+model_fit = model.fit()
 
-    if df is None:
-        st.error("Failed to download data. Check stock symbol or date range.")
-    else:
-        st.success("Data Loaded Successfully!")
+forecast = model_fit.forecast(steps=10)
+future_dates = pd.date_range(start=s.index[-1], periods=11, freq="B")[1:]
 
-        # Keep only Close prices
-        df = df[['Close']]
+fig2 = go.Figure()
+fig2.add_trace(go.Scatter(x=s.index, y=s["Close"], mode="lines", name="Actual"))
+fig2.add_trace(go.Scatter(x=future_dates, y=forecast, mode="lines", name="Forecast", line=dict(color="red", dash="dash")))
+st.plotly_chart(fig2, use_container_width=True)
 
-        # Display data
-        st.dataframe(df.tail())
+# -----------------------------
+# Correlation Heatmap of Returns (Creative Graph)
+# -----------------------------
+st.subheader("🔥 Correlation Heatmap (Returns of All Stocks)")
 
-        # --------------------
-        # Stationarity Test
-        # --------------------
+pivot_returns = df.pivot(index="Date", columns="Stock", values="Close").pct_change()
+corr = pivot_returns.corr()
 
-        p_value, result = check_stationarity(df['Close'])
+fig3, ax = plt.subplots(figsize=(10, 6))
+sns.heatmap(corr, annot=True, cmap="coolwarm", ax=ax)
+st.pyplot(fig3)
 
-        st.subheader("📊 Stationarity Test (ADF)")
-        st.write(f"**ADF p-value:** {p_value:.4f}")
-        st.write(f"**Conclusion:** {result}")
-
-        # Differencing for stationarity
-        df['Close_diff'] = df['Close'].diff()
-        df.dropna(inplace=True)
-
-        # --------------------
-        # ARIMA Model
-        # --------------------
-
-        st.subheader("🔮 ARIMA Model Forecast")
-
-        with st.spinner("Training ARIMA model..."):
-            model = ARIMA(df['Close'], order=(5,1,0))
-            model_fit = model.fit()
-            forecast = model_fit.forecast(steps=10)
-
-        st.success("Forecast Generated!")
-
-        # Forecast date range
-        dates = pd.date_range(start=df.index[-1], periods=11, freq='B')[1:]
-
-        # --------------------
-        # Plotting
-        # --------------------
-
-        fig, ax = plt.subplots(figsize=(12,5))
-        ax.plot(df['Close'], label="Actual Price")
-        ax.plot(dates, forecast, label="Predicted Price", linestyle="dashed", color="red")
-        ax.set_title(f"{stock} Price Forecast")
-        ax.legend()
-
-        st.pyplot(fig)
-
-        # --------------------
-        # Show forecast table
-        # --------------------
-
-        forecast_df = pd.DataFrame({"Date": dates, "Forecast": forecast})
-        forecast_df.set_index("Date", inplace=True)
-
-        st.subheader("📅 Forecasted Values (Next 10 Days)")
-        st.dataframe(forecast_df)
-
+# -----------------------------
+# Completion Message
+# -----------------------------
+st.success("Dashboard Loaded Successfully!")
